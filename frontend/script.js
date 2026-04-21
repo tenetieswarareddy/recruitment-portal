@@ -2,7 +2,7 @@
    JOBHUB - FRONTEND CONNECTED TO EXPRESS API
    ============================================ */
 
-const API_URL = 'http://localhost:5000/api';
+const API_URL = "https://recruitment-portal-1-1ulw.onrender.com";
 
 let currentUser = null;
 let allJobs = [];
