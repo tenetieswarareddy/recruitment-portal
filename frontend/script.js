@@ -2,7 +2,10 @@
    JOBHUB - FRONTEND CONNECTED TO EXPRESS API
    ============================================ */
 
-const API_URL = window.location.hostname === 'localhost'
+const host = window.location.hostname;
+const isLocalHost = host === 'localhost' || host === '127.0.0.1' || host === '';
+
+const API_URL = isLocalHost
   ? 'http://localhost:5000/api'
   : 'https://recruitment-portal-1-1ulw.onrender.com/api';
 
@@ -559,7 +562,7 @@ async function applyForJob(jobId) {
   }
 
   try {
-    await apiFetch(`/jobs/${jobId}/apply`, {
+    await apiFetch(`/jobs/apply/${jobId}`, {
       method: 'POST',
       headers: authHeaders(false),
     });
