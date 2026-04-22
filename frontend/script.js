@@ -2,7 +2,9 @@
    JOBHUB - FRONTEND CONNECTED TO EXPRESS API
    ============================================ */
 
-const API_URL = "https://recruitment-portal-1-1ulw.onrender.com";
+const API_URL = window.location.hostname === 'localhost'
+  ? 'http://localhost:5000/api'
+  : 'https://recruitment-portal-1-1ulw.onrender.com/api';
 
 let currentUser = null;
 let allJobs = [];
@@ -22,7 +24,14 @@ function authHeaders(includeJson = true) {
 }
 
 async function apiFetch(endpoint, options = {}) {
-  const response = await fetch(`${API_URL}${endpoint}`, options);
+  let response;
+
+  try {
+    response = await fetch(`${API_URL}${endpoint}`, options);
+  } catch (_networkError) {
+    throw new Error('Unable to connect to server. Check backend URL, CORS, and internet connection.');
+  }
+
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
@@ -312,175 +321,199 @@ function validatePassword(password) {
 
 function togglePasswordVisibility(inputId) {
   const input = document.getElementById(inputId);
-  input.type = input.type === 'password' ? 'text' : 'password';
+  const toggle = input.nextElementSibling;
+  if (input.type === 'password') {
+    input.type = 'text';
+    toggle.textContent = '🙈';
+  } else {
+    input.type = 'password';
+    toggle.textContent = '👁️';
+  }
 }
 
-document.addEventListener('input', function (e) {
-  if (e.target.id === 'signupPassword') {
-    const password = e.target.value;
-    const strengthEl = document.getElementById('passwordStrength');
-    if (!password) {
-      strengthEl.className = 'password-strength';
-      return;
-    }
+function checkPasswordStrength(password) {
+  const strengthFill = document.getElementById('passwordStrengthFill');
+  const strengthText = document.getElementById('passwordStrengthText');
+  if (!strengthFill || !strengthText) return;
 
-    let strength = 0;
-    if (password.length >= 8) strength++;
-    if (/[a-z]/.test(password)) strength++;
-    if (/[A-Z]/.test(password)) strength++;
-    if (/[0-9]/.test(password)) strength++;
+  let strength = 0;
+  if (password.length >= 8) strength++;
+  if (/[a-z]/.test(password)) strength++;
+  if (/[A-Z]/.test(password)) strength++;
+  if (/\d/.test(password)) strength++;
+  if (/[^A-Za-z0-9]/.test(password)) strength++;
 
-    strengthEl.className = 'password-strength';
-    if (strength <= 1) strengthEl.classList.add('weak');
-    else if (strength === 2) strengthEl.classList.add('medium');
-    else strengthEl.classList.add('strong');
-  }
-});
+  const percentages = ['0%', '20%', '40%', '60%', '80%', '100%'];
+  const texts = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong', 'Very Strong'];
+  const colors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a', '#15803d'];
+
+  strengthFill.style.width = percentages[strength];
+  strengthFill.style.backgroundColor = colors[strength];
+  strengthText.textContent = texts[strength];
+}
 
 function showError(elementId, message) {
   const element = document.getElementById(elementId);
-  if (element) {
-    element.textContent = message;
-    element.classList.add('show');
-  }
+  if (element) element.textContent = message;
 }
 
 function clearErrors() {
   document.querySelectorAll('.error-message').forEach((el) => {
-    el.classList.remove('show');
     el.textContent = '';
   });
 }
 
-function showNotification(message, type = 'success') {
-  const notification = document.getElementById('notification');
+function showNotification(message, type = 'info') {
+  const notification = document.createElement('div');
+  notification.className = `notification ${type}`;
   notification.textContent = message;
-  notification.className = `notification show ${type}`;
-  setTimeout(() => notification.classList.remove('show'), 3000);
+  Object.assign(notification.style, {
+    position: 'fixed',
+    top: '90px',
+    right: '20px',
+    padding: '12px 18px',
+    borderRadius: '8px',
+    color: '#fff',
+    zIndex: '9999',
+    fontWeight: '600',
+    boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
+    backgroundColor:
+      type === 'success' ? '#16a34a' :
+      type === 'error' ? '#dc2626' :
+      type === 'warning' ? '#d97706' : '#2563eb'
+  });
+
+  document.body.appendChild(notification);
+  setTimeout(() => notification.remove(), 3000);
 }
 
 function showPage(page) {
-  navigateTo(page);
+  document.querySelectorAll('.page').forEach((p) => p.classList.remove('active'));
+  const pageElement = document.getElementById(`${page}Page`);
+  if (pageElement) pageElement.classList.add('active');
+  currentPage = page;
+}
+
+function normalizeJob(job) {
+  return {
+    ...job,
+    id: job._id || job.id,
+    applicants: job.applicants || [],
+  };
 }
 
 async function loadJobsFromAPI() {
   try {
     const data = await apiFetch('/jobs');
     allJobs = (data.jobs || []).map(normalizeJob);
-  } catch (error) {
-    showNotification(`Failed to load jobs: ${error.message}`, 'error');
+  } catch (_error) {
     allJobs = [];
   }
 }
 
-function normalizeJob(job) {
-  return {
-    id: job._id,
-    title: job.title,
-    company: job.company,
-    location: job.location,
-    salary: job.salary,
-    description: job.description,
-    jobType: job.jobType,
-    category: job.category,
-    skills: job.skillsRequired || [],
-    experience: job.experience,
-    postedDate: job.createdAt,
-    postedBy: job.postedBy?._id || job.postedBy,
-    applicants: job.applicants || [],
-  };
-}
-
 async function buildCompaniesFromJobs() {
   const companyMap = new Map();
+
   allJobs.forEach((job, index) => {
     if (!companyMap.has(job.company)) {
       companyMap.set(job.company, {
-        id: job.company,
         name: job.company,
+        industry: job.category || 'Technology',
+        location: job.location,
         logo: COMPANY_EMOJIS[index % COMPANY_EMOJIS.length],
-        openJobs: 1,
-        employees: 50 + index * 25,
+        openings: 1,
       });
     } else {
-      companyMap.get(job.company).openJobs += 1;
+      companyMap.get(job.company).openings += 1;
     }
   });
+
   allCompanies = Array.from(companyMap.values());
 }
 
 function renderFeaturedJobs() {
   const container = document.getElementById('featuredJobs');
   if (!container) return;
-  const featured = allJobs.slice(0, 3);
-  container.innerHTML = featured.map((job) => createJobCard(job)).join('');
+
+  const jobs = allJobs.slice(0, 6);
+  container.innerHTML = jobs.map((job) => createJobCard(job)).join('');
 }
 
-function renderJobsList(jobsToDisplay = allJobs) {
+function renderJobsList() {
   const container = document.getElementById('jobsList');
   if (!container) return;
 
-  if (!jobsToDisplay.length) {
-    document.getElementById('noJobsMessage').style.display = 'block';
-    container.innerHTML = '';
-    return;
+  let filteredJobs = [...allJobs];
+
+  const title = document.getElementById('filterSearch')?.value?.toLowerCase() || '';
+  const location = document.getElementById('filterLocation')?.value || '';
+  const type = document.getElementById('filterType')?.value || '';
+
+  if (title) {
+    filteredJobs = filteredJobs.filter((job) =>
+      job.title.toLowerCase().includes(title) ||
+      job.company.toLowerCase().includes(title)
+    );
+  }
+  if (location) {
+    filteredJobs = filteredJobs.filter((job) => job.location === location);
+  }
+  if (type) {
+    filteredJobs = filteredJobs.filter((job) => job.jobType === type);
   }
 
-  document.getElementById('noJobsMessage').style.display = 'none';
-  container.innerHTML = jobsToDisplay.map((job) => createJobListItem(job)).join('');
+  container.innerHTML = filteredJobs.length
+    ? filteredJobs.map((job) => createJobListItem(job)).join('')
+    : '<p>No jobs found.</p>';
+}
+
+function renderCompaniesList() {
+  const container = document.getElementById('companiesList');
+  if (!container) return;
+
+  container.innerHTML = allCompanies.length
+    ? allCompanies.map((company) => `
+      <div class="company-card">
+        <div class="company-logo">${company.logo}</div>
+        <h3>${company.name}</h3>
+        <p>${company.industry}</p>
+        <p>📍 ${company.location}</p>
+        <p><strong>${company.openings}</strong> Open positions</p>
+      </div>
+    `).join('')
+    : '<p>No companies found.</p>';
 }
 
 function createJobCard(job) {
-  const isSaved = currentUser && userSavedJobs.some((saved) => saved.id === job.id);
-  const isApplied = currentUser && userApplications.some((app) => app.jobId === job.id);
-
   return `
-    <div class="job-card" onclick="openJobModal('${job.id}')">
-      <div class="job-card-header">
-        <div>
-          <h3 class="job-card-title">${job.title}</h3>
-          <p class="job-card-company">${job.company}</p>
-        </div>
-        <button class="save-job-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveJob('${job.id}', this)">💔</button>
-      </div>
-      <div class="job-card-meta">
-        <span class="job-badge location">📍 ${job.location}</span>
-        <span class="job-badge salary">💰 ₹${Number(job.salary).toLocaleString()}</span>
-        <span class="job-badge">${job.jobType}</span>
-      </div>
-      <p class="job-description">${job.description.substring(0, 100)}...</p>
-      <div class="job-skills">
-        ${job.skills.slice(0, 3).map((skill) => `<span class="skill-tag">${skill}</span>`).join('')}
-      </div>
-      <div class="job-card-footer">
-        <span style="color: var(--text-light); font-size: 0.85rem;">${new Date(job.postedDate).toLocaleDateString()}</span>
-        <button class="job-apply-btn ${isApplied ? 'applied' : ''}" onclick="event.stopPropagation(); applyForJob('${job.id}')">${isApplied ? '✓ Applied' : 'Apply Now'}</button>
-      </div>
+    <div class="job-card">
+      <h3>${job.title}</h3>
+      <p><strong>${job.company}</strong></p>
+      <p>📍 ${job.location}</p>
+      <p>💼 ${job.jobType}</p>
+      <p>💰 ${formatSalary(job.salary || 0)}</p>
+      <button class="btn-primary" onclick="openJobModal('${job.id}')">View Details</button>
     </div>
   `;
 }
 
 function createJobListItem(job) {
-  const isSaved = currentUser && userSavedJobs.some((saved) => saved.id === job.id);
-  const isApplied = currentUser && userApplications.some((app) => app.jobId === job.id);
-
   return `
-    <div class="job-list-item" onclick="openJobModal('${job.id}')">
-      <div style="display: flex; justify-content: space-between; align-items: start;">
-        <div style="flex: 1;">
-          <h3 style="margin: 0 0 5px 0;">${job.title}</h3>
-          <p style="margin: 0 0 10px 0; color: var(--text-light);">${job.company}</p>
-          <div style="display: flex; flex-wrap: wrap; gap: 10px;">
+    <div class="job-list-item">
+      <div style="display:flex; justify-content:space-between; gap:20px; flex-wrap:wrap;">
+        <div style="flex:1;">
+          <h3 style="margin:0 0 8px 0;">${job.title}</h3>
+          <p style="margin:0 0 8px 0;"><strong>${job.company}</strong></p>
+          <div style="display:flex; flex-wrap:wrap; gap:10px;">
             <span class="job-badge location">📍 ${job.location}</span>
-            <span class="job-badge salary">💰 ₹${Number(job.salary).toLocaleString()}</span>
+            <span class="job-badge salary">💰 ${formatSalary(job.salary || 0)}</span>
             <span class="job-badge">${job.jobType}</span>
           </div>
         </div>
         <div>
-          <button class="save-job-btn ${isSaved ? 'saved' : ''}" onclick="event.stopPropagation(); toggleSaveJob('${job.id}', this)">💔</button>
+          <button class="btn-primary btn-small" onclick="openJobModal('${job.id}')">View</button>
         </div>
       </div>
-      <button class="job-apply-btn ${isApplied ? 'applied' : ''}" style="margin-top: 10px; width: 100%;" onclick="event.stopPropagation(); applyForJob('${job.id}')">${isApplied ? '✓ Applied' : 'Apply Now'}</button>
     </div>
   `;
 }
@@ -489,219 +522,86 @@ function openJobModal(jobId) {
   const job = allJobs.find((j) => j.id === jobId);
   if (!job) return;
 
-  const modalBody = document.getElementById('jobModalBody');
-  const isSaved = currentUser && userSavedJobs.some((saved) => saved.id === job.id);
-  const isApplied = currentUser && userApplications.some((app) => app.jobId === job.id);
+  const modal = document.getElementById('jobModal');
+  const content = document.getElementById('jobModalContent');
 
-  modalBody.innerHTML = `
-    <div>
-      <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 20px;">
-        <div>
-          <h2 style="margin: 0;">${job.title}</h2>
-          <p style="margin: 10px 0 0 0; color: var(--text-light); font-size: 1.1rem;">${job.company}</p>
-        </div>
-        <button class="save-job-btn ${isSaved ? 'saved' : ''}" onclick="toggleSaveJob('${job.id}', this); updateModal('${job.id}')" style="font-size: 1.8rem; cursor: pointer;">💔</button>
-      </div>
-      <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 25px;">
-        <div><strong>Location:</strong><br><span class="job-badge location">📍 ${job.location}</span></div>
-        <div><strong>Salary:</strong><br><span class="job-badge salary">💰 ₹${Number(job.salary).toLocaleString()}/year</span></div>
-        <div><strong>Job Type:</strong><br><span class="job-badge">${job.jobType}</span></div>
-        <div><strong>Experience:</strong><br><span class="job-badge">${job.experience} years</span></div>
-      </div>
-      <h3>Description</h3>
-      <p>${job.description}</p>
-      <h3>Required Skills</h3>
-      <div class="job-skills" style="margin-bottom: 20px;">
-        ${job.skills.map((skill) => `<span class="skill-tag">${skill}</span>`).join('')}
-      </div>
-      <button class="job-apply-btn ${isApplied ? 'applied' : ''}" style="width: 100%; padding: 15px; font-size: 1rem;" onclick="applyForJob('${job.id}'); closeJobModal()">${isApplied ? '✓ Already Applied' : 'Apply Now'}</button>
-    </div>
+  if (!modal || !content) return;
+
+  content.innerHTML = `
+    <h2>${job.title}</h2>
+    <p><strong>Company:</strong> ${job.company}</p>
+    <p><strong>Location:</strong> ${job.location}</p>
+    <p><strong>Type:</strong> ${job.jobType}</p>
+    <p><strong>Salary:</strong> ${formatSalary(job.salary || 0)}</p>
+    <p><strong>Experience:</strong> ${job.experience || 0} years</p>
+    <p><strong>Category:</strong> ${job.category || 'General'}</p>
+    <p><strong>Description:</strong> ${job.description || 'No description available'}</p>
+    <p><strong>Skills:</strong> ${job.skillsRequired || 'Not specified'}</p>
+    ${
+      currentUser && currentUser.role === 'job-seeker'
+        ? `<button class="btn-primary" onclick="applyForJob('${job.id}')">Apply Now</button>`
+        : ''
+    }
   `;
-
-  document.getElementById('jobModal').classList.add('active');
-}
-
-function updateModal(jobId) {
-  openJobModal(jobId);
+  modal.style.display = 'flex';
 }
 
 function closeJobModal() {
-  document.getElementById('jobModal').classList.remove('active');
-}
-
-document.getElementById('jobModal').addEventListener('click', function (e) {
-  if (e.target === this) closeJobModal();
-});
-
-function applyFilters() {
-  const searchText = document.getElementById('filterSearch').value.toLowerCase();
-  const location = document.getElementById('filterLocation').value.toLowerCase();
-  const salary = parseInt(document.getElementById('filterSalary').value, 10);
-  const category = document.getElementById('filterCategory').value;
-  const fullTime = document.getElementById('filterFullTime').checked;
-  const partTime = document.getElementById('filterPartTime').checked;
-  const remote = document.getElementById('filterRemote').checked;
-
-  document.getElementById('salaryDisplay').textContent = `Max: ₹${salary.toLocaleString()}`;
-
-  const filtered = allJobs.filter((job) => {
-    const matchSearch = job.title.toLowerCase().includes(searchText) || job.company.toLowerCase().includes(searchText);
-    const matchLocation = job.location.toLowerCase().includes(location);
-    const matchSalary = Number(job.salary) <= salary;
-    const matchCategory = !category || job.category === category;
-    let matchType = true;
-    if (fullTime || partTime || remote) {
-      matchType = (fullTime && job.jobType === 'Full Time') || (partTime && job.jobType === 'Part Time') || (remote && job.jobType === 'Remote');
-    }
-    return matchSearch && matchLocation && matchSalary && matchCategory && matchType;
-  });
-
-  renderJobsList(filtered);
-}
-
-function resetFilters() {
-  document.getElementById('filterSearch').value = '';
-  document.getElementById('filterLocation').value = '';
-  document.getElementById('filterSalary').value = 500000;
-  document.getElementById('filterCategory').value = '';
-  document.getElementById('filterFullTime').checked = false;
-  document.getElementById('filterPartTime').checked = false;
-  document.getElementById('filterRemote').checked = false;
-  document.getElementById('salaryDisplay').textContent = 'Max: ₹500,000';
-  renderJobsList();
-}
-
-async function searchJobs() {
-  const jobTitle = document.getElementById('searchJobTitle').value;
-  const location = document.getElementById('searchLocation').value;
-  await navigateTo('jobs');
-  setTimeout(() => {
-    if (jobTitle) document.getElementById('filterSearch').value = jobTitle;
-    if (location) document.getElementById('filterLocation').value = location;
-    applyFilters();
-  }, 100);
-}
-
-async function toggleSaveJob(jobId, button) {
-  if (!currentUser) {
-    showNotification('Please login to save jobs', 'warning');
-    navigateTo('login');
-    return;
-  }
-
-  const alreadySaved = userSavedJobs.some((saved) => saved.id === jobId);
-  try {
-    if (alreadySaved) {
-      await apiFetch(`/jobs/save/${jobId}`, { method: 'DELETE', headers: authHeaders(false) });
-      showNotification('Job removed from saved', 'success');
-    } else {
-      await apiFetch(`/jobs/save/${jobId}`, { method: 'POST', headers: authHeaders(false) });
-      showNotification('Job saved successfully!', 'success');
-    }
-
-    await loadSavedJobs();
-    if (button) button.classList.toggle('saved');
-  } catch (error) {
-    showNotification(error.message, 'error');
-  }
+  const modal = document.getElementById('jobModal');
+  if (modal) modal.style.display = 'none';
 }
 
 async function applyForJob(jobId) {
   if (!currentUser) {
-    showNotification('Please login to apply', 'warning');
+    showNotification('Please login first', 'warning');
     navigateTo('login');
     return;
   }
 
   try {
-    await apiFetch(`/jobs/apply/${jobId}`, { method: 'POST', headers: authHeaders(false) });
-    showNotification('Application submitted successfully!', 'success');
-    await loadAppliedJobs();
-    renderJobsList();
-    renderFeaturedJobs();
-  } catch (error) {
-    showNotification(error.message, error.message.includes('already') ? 'warning' : 'error');
-  }
-}
-
-function renderCompaniesList() {
-  const container = document.getElementById('companiesList');
-  if (!container) return;
-
-  container.innerHTML = allCompanies.map((company) => `
-    <div class="company-card">
-      <div class="company-logo">${company.logo}</div>
-      <h3 class="company-name">${company.name}</h3>
-      <p class="company-description">Leading organization in the industry</p>
-      <div class="company-stats">
-        <div class="company-stat"><div class="company-stat-value">${company.openJobs}</div><div class="company-stat-label">Open Jobs</div></div>
-        <div class="company-stat"><div class="company-stat-value">${company.employees}</div><div class="company-stat-label">Employees</div></div>
-      </div>
-      <button class="btn-primary" style="width: 100%;" onclick="navigateTo('jobs')">View Jobs</button>
-    </div>
-  `).join('');
-}
-
-async function loadDashboard() {
-  if (!currentUser) {
-    navigateTo('login');
-    return;
-  }
-
-  const profileData = await apiFetch('/auth/profile', { method: 'GET', headers: authHeaders(false) });
-  currentUser = profileData.user;
-  localStorage.setItem('currentUser', JSON.stringify(currentUser));
-
-  const isRecruiter = currentUser.role === 'recruiter';
-  document.getElementById('postJobTab').style.display = isRecruiter ? 'block' : 'none';
-  document.getElementById('manageJobsTab').style.display = isRecruiter ? 'block' : 'none';
-  document.getElementById('viewApplicantsTab').style.display = isRecruiter ? 'block' : 'none';
-  document.getElementById('resumeUploadTab').style.display = isRecruiter ? 'none' : 'block';
-  document.getElementById('appliedJobsTab').style.display = isRecruiter ? 'none' : 'block';
-  document.getElementById('savedJobsTab').style.display = isRecruiter ? 'none' : 'block';
-
-  document.getElementById('userFullName').textContent = currentUser.fullName;
-  document.getElementById('userRole').textContent = isRecruiter ? 'Recruiter' : 'Job Seeker';
-  document.getElementById('profileFullName').value = currentUser.fullName;
-  document.getElementById('profileEmail').value = currentUser.email;
-  document.getElementById('profilePhone').value = currentUser.phone || '';
-  document.getElementById('profileLocation').value = currentUser.profile?.location || '';
-  document.getElementById('profileBio').value = currentUser.profile?.bio || '';
-  document.getElementById('profileSkills').value = (currentUser.profile?.skills || []).join(', ');
-
-  await Promise.all([loadAppliedJobs(), loadSavedJobs(), loadManagedJobs(), loadApplicants()]);
-}
-
-function switchDashboardTab(tabName) {
-  document.querySelectorAll('.tab-content').forEach((tab) => tab.classList.remove('active'));
-  document.querySelectorAll('.tab-link').forEach((link) => link.classList.remove('active'));
-  document.getElementById(tabName)?.classList.add('active');
-  document.querySelector(`[data-tab="${tabName}"]`)?.classList.add('active');
-}
-
-async function updateProfile(e) {
-  e.preventDefault();
-
-  try {
-    const data = await apiFetch('/auth/profile', {
-      method: 'PUT',
-      headers: authHeaders(),
-      body: JSON.stringify({
-        fullName: document.getElementById('profileFullName').value,
-        phone: document.getElementById('profilePhone').value,
-        location: document.getElementById('profileLocation').value,
-        bio: document.getElementById('profileBio').value,
-        skills: document.getElementById('profileSkills').value,
-      }),
+    await apiFetch(`/jobs/${jobId}/apply`, {
+      method: 'POST',
+      headers: authHeaders(false),
     });
-
-    currentUser = data.user;
-    localStorage.setItem('currentUser', JSON.stringify(currentUser));
-    updateNavbar();
-    showNotification('Profile updated successfully!', 'success');
+    showNotification('Applied successfully!', 'success');
+    closeJobModal();
+    await loadAppliedJobs();
   } catch (error) {
     showNotification(error.message, 'error');
   }
+}
+
+async function loadDashboard() {
+  if (!currentUser) return;
+
+  document.getElementById('dashboardWelcome').textContent = `Welcome, ${currentUser.fullName}`;
+  document.getElementById('profileFullName').value = currentUser.fullName || '';
+  document.getElementById('profileEmail').value = currentUser.email || '';
+  document.getElementById('profilePhone').value = currentUser.phone || '';
+  document.getElementById('profileRole').value = currentUser.role || '';
+
+  if (currentUser.role === 'job-seeker') {
+    document.getElementById('jobSeekerDashboard').style.display = 'block';
+    document.getElementById('recruiterDashboard').style.display = 'none';
+    await loadAppliedJobs();
+    await loadSavedJobs();
+  } else {
+    document.getElementById('jobSeekerDashboard').style.display = 'none';
+    document.getElementById('recruiterDashboard').style.display = 'block';
+    await loadManagedJobs();
+    await loadApplicants();
+  }
+}
+
+function switchDashboardTab(tabName) {
+  document.querySelectorAll('.dashboard-tab').forEach((tab) => tab.classList.remove('active'));
+  document.querySelectorAll('.dashboard-content').forEach((content) => content.classList.remove('active'));
+
+  const tabButton = document.querySelector(`[data-tab="${tabName}"]`);
+  const tabContent = document.getElementById(`${tabName}Content`);
+
+  if (tabButton) tabButton.classList.add('active');
+  if (tabContent) tabContent.classList.add('active');
 }
 
 async function loadAppliedJobs() {
@@ -746,7 +646,7 @@ async function loadSavedJobs() {
 
     document.getElementById('noSavedJobs').style.display = 'none';
     container.innerHTML = userSavedJobs.map((job) => createJobListItem(job)).join('');
-  } catch (error) {
+  } catch (_error) {
     userSavedJobs = [];
     container.innerHTML = '';
   }
@@ -869,7 +769,7 @@ async function loadApplicants() {
 
     document.getElementById('noApplicants').style.display = 'none';
     container.innerHTML = applicantBlocks.join('');
-  } catch (error) {
+  } catch (_error) {
     container.innerHTML = '';
   }
 }
